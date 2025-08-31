@@ -1,0 +1,27 @@
+export default {
+  light: {
+    text: '#333',
+    background: '#fff',
+    tint: '#FF6B35',
+    tabIconDefault: '#999',
+    tabIconSelected: '#FF6B35',
+  },
+  primary: '#FF6B35',
+  secondary: '#F7931E',
+  accent: '#FFB84D',
+  success: '#4CAF50',
+  warning: '#FF9800',
+  error: '#F44336',
+  gray: {
+    50: '#f8f9fa',
+    100: '#f5f5f5',
+    200: '#e9ecef',
+    300: '#dee2e6',
+    400: '#ced4da',
+    500: '#adb5bd',
+    600: '#6c757d',
+    700: '#495057',
+    800: '#343a40',
+    900: '#212529',
+  },
+};
