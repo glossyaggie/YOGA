@@ -9,6 +9,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -41,8 +42,8 @@ export default function LoginScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="light" />
+    <View style={styles.container}>
+      <StatusBar style="light" hidden />
       <LinearGradient
         colors={['#FF6B35', '#F7931E']}
         style={styles.gradient}
@@ -51,73 +52,75 @@ export default function LoginScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardView}
         >
-          <View style={styles.header}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => router.back()}
-            >
-              <ArrowLeft size={24} color="white" />
-            </TouchableOpacity>
-            <Text style={styles.title}>Welcome Back</Text>
-            <Text style={styles.subtitle}>Sign in to continue your practice</Text>
-          </View>
-
-          <View style={styles.form}>
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={styles.input}
-                placeholder="Email"
-                placeholderTextColor="rgba(255, 255, 255, 0.7)"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
+          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+            <View style={styles.header}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => router.back()}
+              >
+                <ArrowLeft size={24} color="white" />
+              </TouchableOpacity>
+              <Text style={styles.title}>Welcome Back</Text>
+              <Text style={styles.subtitle}>Sign in to continue your practice</Text>
             </View>
 
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={[styles.input, { paddingRight: 50 }]}
-                placeholder="Password"
-                placeholderTextColor="rgba(255, 255, 255, 0.7)"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-              />
+            <View style={styles.form}>
+              <View style={styles.inputContainer}>
+                                 <TextInput
+                   style={styles.input}
+                   placeholder="Email"
+                   placeholderTextColor="rgba(0, 0, 0, 0.6)"
+                   value={email}
+                   onChangeText={setEmail}
+                   keyboardType="email-address"
+                   autoCapitalize="none"
+                 />
+               </View>
+
+               <View style={styles.inputContainer}>
+                 <TextInput
+                   style={[styles.input, { paddingRight: 50 }]}
+                   placeholder="Password"
+                   placeholderTextColor="rgba(0, 0, 0, 0.6)"
+                   value={password}
+                   onChangeText={setPassword}
+                   secureTextEntry={!showPassword}
+                 />
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowPassword(!showPassword)}
+                >
+                                     {showPassword ? (
+                     <EyeOff size={20} color="rgba(0, 0, 0, 0.6)" />
+                   ) : (
+                     <Eye size={20} color="rgba(0, 0, 0, 0.6)" />
+                   )}
+                </TouchableOpacity>
+              </View>
+
               <TouchableOpacity
-                style={styles.eyeButton}
-                onPress={() => setShowPassword(!showPassword)}
+                style={styles.loginButton}
+                onPress={handleLogin}
+                disabled={loading}
               >
-                {showPassword ? (
-                  <EyeOff size={20} color="rgba(255, 255, 255, 0.7)" />
-                ) : (
-                  <Eye size={20} color="rgba(255, 255, 255, 0.7)" />
-                )}
+                <Text style={styles.loginButtonText}>
+                  {loading ? 'Signing In...' : 'Sign In'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.signupLink}
+                onPress={() => router.push('/(auth)/signup')}
+              >
+                <Text style={styles.signupText}>
+                  Don't have an account? <Text style={styles.signupBold}>Sign Up</Text>
+                </Text>
               </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={styles.loginButton}
-              onPress={handleLogin}
-              disabled={loading}
-            >
-              <Text style={styles.loginButtonText}>
-                {loading ? 'Signing In...' : 'Sign In'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.signupLink}
-              onPress={() => router.push('/(auth)/signup')}
-            >
-              <Text style={styles.signupText}>
-                Don't have an account? <Text style={styles.signupBold}>Sign Up</Text>
-              </Text>
-            </TouchableOpacity>
-          </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </LinearGradient>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -131,9 +134,12 @@ const styles = StyleSheet.create({
   keyboardView: {
     flex: 1,
   },
+  scrollView: {
+    flex: 1,
+  },
   header: {
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 60,
     paddingBottom: 40,
   },
   backButton: {
@@ -158,14 +164,15 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   input: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'white',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
     fontSize: 16,
-    color: 'white',
+    color: '#000',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
+    elevation: 0,
   },
   eyeButton: {
     position: 'absolute',

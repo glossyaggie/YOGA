@@ -1,76 +1,126 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
+  RefreshControl,
+  Alert,
+  Dimensions,
 } from 'react-native';
-import { Calendar, Clock, Users, Flame } from 'lucide-react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from 'expo-router';
+import { Calendar, Clock, Users, Thermometer, User } from 'lucide-react-native';
+import { supabase } from '../../src/lib/supabase';
+import { Class } from '../../src/types/database';
+import { bookClass, getUserBookings } from '../../src/lib/api';
+import { useAuth } from '../../providers/auth-provider';
+import colors from '../../constants/colors';
+import * as Haptics from 'expo-haptics';
 
-const mockClasses = [
-  {
-    id: 1,
-    name: 'Hot Vinyasa Flow',
-    instructor: 'Sarah Johnson',
-    time: '6:00 AM',
-    duration: 60,
-    temperature: 95,
-    spotsAvailable: 8,
-    totalSpots: 20,
-    level: 'All Levels',
-  },
-  {
-    id: 2,
-    name: 'Bikram 26 & 2',
-    instructor: 'Mike Chen',
-    time: '7:30 AM',
-    duration: 90,
-    temperature: 105,
-    spotsAvailable: 12,
-    totalSpots: 25,
-    level: 'Beginner',
-  },
-  {
-    id: 3,
-    name: 'Power Yoga',
-    instructor: 'Emma Wilson',
-    time: '9:00 AM',
-    duration: 75,
-    temperature: 90,
-    spotsAvailable: 3,
-    totalSpots: 15,
-    level: 'Intermediate',
-  },
-  {
-    id: 4,
-    name: 'Yin Yoga',
-    instructor: 'David Park',
-    time: '6:00 PM',
-    duration: 60,
-    temperature: 85,
-    spotsAvailable: 15,
-    totalSpots: 20,
-    level: 'All Levels',
-  },
-  {
-    id: 5,
-    name: 'Hot Flow',
-    instructor: 'Lisa Martinez',
-    time: '7:30 PM',
-    duration: 60,
-    temperature: 95,
-    spotsAvailable: 0,
-    totalSpots: 18,
-    level: 'Advanced',
-  },
-];
+const { width } = Dimensions.get('window');
 
-const days = ['Today', 'Tomorrow', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const DAYS_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export default function ScheduleScreen() {
-  const [selectedDay, setSelectedDay] = useState(0);
+  const { user } = useAuth();
+  // Convert JavaScript day (0=Sunday, 1=Monday) to our Monday-first array (0=Monday, 6=Sunday)
+  const getCurrentDayIndex = () => {
+    const jsDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
+    return jsDay === 0 ? 6 : jsDay - 1; // Convert to Monday-first: Sunday becomes 6, Monday becomes 0
+  };
+  
+  const [selectedDay, setSelectedDay] = useState(getCurrentDayIndex());
+  const [classes, setClasses] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [booking, setBooking] = useState<number | null>(null);
+  const [bookedClasses, setBookedClasses] = useState<Set<number>>(new Set()); // Temporary green flash
+  const [actuallyBookedClasses, setActuallyBookedClasses] = useState<Set<number>>(new Set()); // Permanent green
+
+  const fetchUserBookings = async () => {
+    if (!user) return;
+    
+    try {
+      const bookings = await getUserBookings();
+      const selectedDate = getSelectedDate();
+      
+      // Find bookings for the selected date and get class IDs
+      const bookedClassIds = bookings
+        .filter(booking => booking.booking_date === selectedDate)
+        .map(booking => booking.class_id)
+        .filter(id => id !== null);
+      
+      setActuallyBookedClasses(new Set(bookedClassIds));
+    } catch (error) {
+      console.error('Error fetching user bookings:', error);
+    }
+  };
+
+  const fetchClasses = async () => {
+    try {
+      setLoading(true);
+      // Reset temporary booked classes visual state when fetching new data
+      setBookedClasses(new Set());
+      
+      // Convert our Monday-first day index back to JavaScript day format for database
+      const jsDay = selectedDay === 6 ? 0 : selectedDay + 1; // 6 (Sunday) becomes 0, others add 1
+      
+      const { data, error } = await supabase
+        .from('classes')
+        .select('*')
+        .eq('day_of_week', jsDay)
+        .eq('is_active', true)
+        .order('start_time');
+
+      if (error) {
+        console.error('Error fetching classes:', error);
+        Alert.alert('Error', 'Failed to load schedule');
+        return;
+      }
+
+      // Filter out classes that have already started today
+      const now = new Date();
+      const currentTime = now.toTimeString().substring(0, 5); // Format: HH:MM
+      const isToday = getCurrentDayIndex() === selectedDay;
+      
+      const filteredClasses = (data || []).filter(classData => {
+        if (!isToday) return true; // Show all classes for future days
+        return classData.start_time > currentTime; // Only show classes that haven't started yet
+      });
+
+      console.log('Fetched classes:', filteredClasses);
+      setClasses(filteredClasses);
+    } catch (error) {
+      console.error('Error:', error);
+      Alert.alert('Error', 'Failed to load schedule');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchClasses();
+      fetchUserBookings();
+    }, [selectedDay, user])
+  );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([fetchClasses(), fetchUserBookings()]);
+    setRefreshing(false);
+  };
+
+  const formatTime = (time: string) => {
+    const [hours, minutes] = time.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour % 12 || 12;
+    return `${displayHour}:${minutes} ${ampm}`;
+  };
 
   const getLevelColor = (level: string) => {
     switch (level) {
@@ -85,101 +135,227 @@ export default function ScheduleScreen() {
     }
   };
 
+  const getTemperatureColor = (temp: number | null) => {
+    if (!temp) return '#9E9E9E';
+    if (temp >= 38) return '#F44336'; // Hot
+    if (temp >= 32) return '#FF9800'; // Warm
+    return '#4CAF50'; // Room temp
+  };
+
+  const getSelectedDate = () => {
+    const today = new Date();
+    const currentDayIndex = getCurrentDayIndex();
+    const dayDiff = selectedDay - currentDayIndex;
+    const targetDate = new Date(today.getTime() + dayDiff * 24 * 60 * 60 * 1000);
+    return targetDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+  };
+
+  const handleBookClass = async (classId: number) => {
+    try {
+      setBooking(classId);
+      const selectedDate = getSelectedDate();
+      await bookClass(classId, selectedDate);
+      
+      // Add haptic feedback - strong success vibration
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      
+      // Add visual feedback - mark class as booked
+      setBookedClasses(prev => new Set(prev).add(classId));
+      
+      // Show success alert
+      Alert.alert('🎉 Success!', 'Class booked successfully!');
+      
+      // Refresh the data after a short delay to show the green effect
+      setTimeout(async () => {
+        await Promise.all([fetchClasses(), fetchUserBookings()]);
+      }, 1500);
+    } catch (error) {
+      console.error('Booking error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to book class';
+      
+      // Add haptic feedback - error vibration
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      
+      Alert.alert('Booking Error', errorMessage);
+    } finally {
+      setBooking(null);
+    }
+  };
+
+  const getOrdinalSuffix = (day: number) => {
+    if (day > 3 && day < 21) return 'th';
+    switch (day % 10) {
+      case 1: return 'st';
+      case 2: return 'nd';
+      case 3: return 'rd';
+      default: return 'th';
+    }
+  };
+
+  const getDayDate = (dayIndex: number) => {
+    const today = new Date();
+    const currentDayIndex = getCurrentDayIndex();
+    const dayDiff = dayIndex - currentDayIndex;
+    const targetDate = new Date(today.getTime() + dayDiff * 24 * 60 * 60 * 1000);
+    const day = targetDate.getDate();
+    return `${day}${getOrdinalSuffix(day)}`;
+  };
+
+  const renderDayButton = (dayIndex: number) => {
+    const isSelected = selectedDay === dayIndex;
+    const isToday = getCurrentDayIndex() === dayIndex;
+    const dayDate = getDayDate(dayIndex);
+    
+    return (
+      <TouchableOpacity
+        key={dayIndex}
+        style={[
+          styles.dayButton,
+          isSelected && styles.dayButtonSelected,
+          isToday && !isSelected && styles.dayButtonToday
+        ]}
+        onPress={() => setSelectedDay(dayIndex)}
+      >
+        <Text style={[
+          styles.dayButtonText,
+          isSelected && styles.dayButtonTextSelected,
+          isToday && !isSelected && styles.dayButtonTextToday
+        ]}>
+          {DAYS_SHORT[dayIndex]}
+        </Text>
+        <Text style={[
+          styles.dayDateText,
+          isSelected && styles.dayDateTextSelected,
+          isToday && !isSelected && styles.dayDateTextToday
+        ]}>
+          {dayDate}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderClassCard = (classData: any) => {
+    const spotsLeft = classData.max_capacity - (classData.current_bookings || 0);
+    const isFull = spotsLeft <= 0;
+    const isBooking = booking === classData.id;
+    const isJustBooked = bookedClasses.has(classData.id); // Temporary green flash
+    const isActuallyBooked = actuallyBookedClasses.has(classData.id); // Permanent green
+    const isBooked = isJustBooked || isActuallyBooked;
+
+    return (
+      <View key={classData.id} style={[
+        styles.classCard,
+        isBooked && styles.classCardBooked
+      ]}>
+        <View style={styles.classHeader}>
+          <View style={styles.classInfo}>
+            <Text style={styles.className}>{classData.class_name || 'Class'}</Text>
+            <Text style={styles.classDescription} numberOfLines={2}>
+              {classData.description || 'Join us for an amazing yoga experience'}
+            </Text>
+          </View>
+          <View style={[
+            styles.levelBadge,
+            { backgroundColor: getLevelColor(classData.level || 'All Levels') }
+          ]}>
+            <Text style={styles.levelText}>{classData.level || 'All Levels'}</Text>
+          </View>
+        </View>
+
+        <View style={styles.classDetails}>
+          <View style={styles.detailRow}>
+            <User size={16} color={colors.primary} />
+            <Text style={styles.detailText}>{classData.instructor || 'Instructor'}</Text>
+          </View>
+          
+          <View style={styles.detailRow}>
+            <Clock size={16} color={colors.primary} />
+            <Text style={styles.detailText}>
+              {formatTime(classData.start_time || '00:00')} - {formatTime(classData.end_time || '00:00')}
+            </Text>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Users size={16} color={colors.primary} />
+            <Text style={styles.detailText}>
+              Max {classData.max_capacity} students
+            </Text>
+          </View>
+
+                     {classData.temperature_celsius && (
+             <View style={styles.detailRow}>
+               <Thermometer size={16} color={getTemperatureColor(classData.temperature_celsius)} />
+               <Text style={[
+                 styles.detailText,
+                 { color: getTemperatureColor(classData.temperature_celsius) }
+               ]}>
+                 {classData.temperature_celsius}°C
+               </Text>
+             </View>
+           )}
+        </View>
+
+        <TouchableOpacity 
+          style={[
+            styles.bookButton,
+            isBooking && styles.bookButtonDisabled,
+            isBooked && styles.bookButtonSuccess
+          ]}
+          onPress={() => handleBookClass(classData.id)}
+          disabled={isBooking || isActuallyBooked}
+        >
+          {isBooking ? (
+            <Text style={styles.bookButtonText}>Booking...</Text>
+          ) : isActuallyBooked ? (
+            <Text style={styles.bookButtonText}>✓ Booked</Text>
+          ) : isJustBooked ? (
+            <Text style={styles.bookButtonText}>✓ Booked!</Text>
+          ) : (
+            <Text style={styles.bookButtonText}>Book Class</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Class Schedule</Text>
-        <Text style={styles.subtitle}>Book your next session</Text>
+        <Text style={styles.subtitle}>{DAYS[selectedDay]}</Text>
+      </View>
+
+      <View style={styles.daySelector}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {DAYS.map((_, index) => renderDayButton(index))}
+        </ScrollView>
       </View>
 
       <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.daySelector}
-        contentContainerStyle={styles.daySelectorContent}
+        style={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
-        {days.map((day, index) => (
-          <TouchableOpacity
-            key={index}
-            style={[
-              styles.dayButton,
-              selectedDay === index && styles.selectedDayButton,
-            ]}
-            onPress={() => setSelectedDay(index)}
-          >
-            <Text
-              style={[
-                styles.dayText,
-                selectedDay === index && styles.selectedDayText,
-              ]}
-            >
-              {day}
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Loading schedule...</Text>
+          </View>
+        ) : classes.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Calendar size={48} color={colors.gray} />
+            <Text style={styles.emptyTitle}>No Classes Today</Text>
+            <Text style={styles.emptyText}>
+              Check another day or contact us for updates
             </Text>
-          </TouchableOpacity>
-        ))}
+          </View>
+        ) : (
+          <View style={styles.classesContainer}>
+            {classes.map(renderClassCard)}
+          </View>
+        )}
       </ScrollView>
-
-      <ScrollView 
-        style={styles.classList} 
-        showsVerticalScrollIndicator={false} 
-        contentContainerStyle={styles.classListContent}
-      >
-        {mockClasses.map((classItem) => (
-          <TouchableOpacity key={classItem.id} style={styles.classCard}>
-            <View style={styles.classHeader}>
-              <View style={styles.classMainInfo}>
-                <Text style={styles.className}>{classItem.name}</Text>
-                <Text style={styles.instructor}>with {classItem.instructor}</Text>
-              </View>
-              <View
-                style={[
-                  styles.levelBadge,
-                  { backgroundColor: getLevelColor(classItem.level) },
-                ]}
-              >
-                <Text style={styles.levelText}>{classItem.level}</Text>
-              </View>
-            </View>
-
-            <View style={styles.classDetails}>
-              <View style={styles.detailItem}>
-                <Clock size={16} color="#666" />
-                <Text style={styles.detailText}>
-                  {classItem.time} • {classItem.duration}min
-                </Text>
-              </View>
-              <View style={styles.detailItem}>
-                <Flame size={16} color="#FF6B35" />
-                <Text style={styles.detailText}>{classItem.temperature}°F</Text>
-              </View>
-              <View style={styles.detailItem}>
-                <Users size={16} color="#666" />
-                <Text style={styles.detailText}>
-                  {classItem.spotsAvailable}/{classItem.totalSpots} spots
-                </Text>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={[
-                styles.bookButton,
-                classItem.spotsAvailable === 0 && styles.fullButton,
-              ]}
-              disabled={classItem.spotsAvailable === 0}
-            >
-              <Text
-                style={[
-                  styles.bookButtonText,
-                  classItem.spotsAvailable === 0 && styles.fullButtonText,
-                ]}
-              >
-                {classItem.spotsAvailable === 0 ? 'Class Full' : 'Book Class'}
-              </Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -189,126 +365,177 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
   },
   header: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 16,
-    backgroundColor: 'white',
+    padding: 20,
+    backgroundColor: colors.primary,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#333',
+    color: 'white',
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
+    color: 'rgba(255, 255, 255, 0.8)',
   },
   daySelector: {
     backgroundColor: 'white',
-  },
-  daySelectorContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    gap: 8,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
   },
   dayButton: {
-    width: 50,
-    height: 32,
-    borderRadius: 6,
-    backgroundColor: '#f5f5f5',
-    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 5,
+    borderRadius: 20,
+    backgroundColor: '#f8f9fa',
     alignItems: 'center',
+    minWidth: 60,
   },
-  selectedDayButton: {
-    backgroundColor: '#FF6B35',
+  dayButtonSelected: {
+    backgroundColor: colors.primary,
   },
-  dayText: {
-    fontSize: 12,
+  dayButtonToday: {
+    backgroundColor: colors.secondary,
+  },
+  dayButtonText: {
+    fontSize: 14,
     fontWeight: '600',
-    color: '#666',
+    color: colors.gray,
   },
-  selectedDayText: {
+  dayButtonTextSelected: {
     color: 'white',
   },
-  classList: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
+  dayButtonTextToday: {
+    color: 'white',
   },
-  classListContent: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 16,
+  dayDateText: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: colors.gray,
+    marginTop: 2,
+  },
+  dayDateTextSelected: {
+    color: 'white',
+  },
+  dayDateTextToday: {
+    color: 'white',
+  },
+  content: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: colors.gray,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: colors.gray,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: colors.gray,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  classesContainer: {
+    padding: 20,
   },
   classCard: {
     backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  classCardBooked: {
+    backgroundColor: '#e8f5e8',
+    borderWidth: 2,
+    borderColor: '#4CAF50',
   },
   classHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 10,
+    marginBottom: 16,
   },
-  classMainInfo: {
+  classInfo: {
     flex: 1,
+    marginRight: 12,
   },
   className: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 2,
+    color: '#1a1a1a',
+    marginBottom: 4,
   },
-  instructor: {
-    fontSize: 13,
-    color: '#666',
+  classDescription: {
+    fontSize: 14,
+    color: colors.gray,
+    lineHeight: 20,
   },
   levelBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
   },
   levelText: {
-    fontSize: 9,
+    fontSize: 12,
     fontWeight: '600',
     color: 'white',
   },
   classDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 20,
   },
-  detailItem: {
+  detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    marginBottom: 8,
   },
   detailText: {
-    fontSize: 11,
-    color: '#666',
+    fontSize: 14,
+    color: '#4a4a4a',
+    marginLeft: 8,
   },
   bookButton: {
-    backgroundColor: '#FF6B35',
-    paddingVertical: 10,
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
     borderRadius: 8,
     alignItems: 'center',
   },
-  fullButton: {
-    backgroundColor: '#f5f5f5',
-  },
   bookButtonText: {
     color: 'white',
-    fontSize: 14,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '600',
   },
-  fullButtonText: {
-    color: '#999',
+  bookButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  bookButtonSuccess: {
+    backgroundColor: '#4CAF50',
   },
 });

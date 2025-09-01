@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Dimensions,
   TouchableOpacity,
-  SafeAreaView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -57,8 +56,8 @@ export default function OnboardingScreen() {
   const IconComponent = currentItem.icon;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="light" />
+    <View style={styles.container}>
+      <StatusBar style="light" backgroundColor="#FF6B35" translucent={false} />
       <LinearGradient
         colors={['#FF6B35', '#F7931E', '#FFB84D']}
         style={styles.gradient}
@@ -94,22 +93,27 @@ export default function OnboardingScreen() {
           </TouchableOpacity>
         </View>
       </LinearGradient>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#FF6B35',
   },
   gradient: {
     flex: 1,
+    width: '100%',
+    height: '100%',
   },
   content: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 40,
+    paddingTop: 60,
+    paddingBottom: 60,
   },
   skipButton: {
     position: 'absolute',

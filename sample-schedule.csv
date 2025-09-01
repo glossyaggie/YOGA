@@ -1,0 +1,16 @@
+class_name,description,instructor,level,temperature_celsius,duration_minutes,max_capacity,day_of_week,start_time,end_time
+Hot Vinyasa Flow,Powerful flow in heated room,Sarah Johnson,Intermediate,38,60,20,1,06:00,07:00
+Bikram 26+2,Traditional 26 postures,Michael Chen,All Levels,40,90,15,1,07:30,09:00
+Power Flow,High energy vinyasa,Emma Wilson,Advanced,35,75,18,1,09:00,10:15
+Yin Yoga,Slow deep stretches,Lisa Park,Beginner,25,60,25,2,06:00,07:00
+Hot Vinyasa Flow,Powerful flow in heated room,Sarah Johnson,Intermediate,38,60,20,2,07:30,08:30
+Restorative Yoga,Gentle healing poses,David Kim,All Levels,25,75,20,2,18:00,19:15
+Morning Flow,Energizing start to your day,Emma Wilson,All Levels,30,60,22,3,06:00,07:00
+Bikram 26+2,Traditional 26 postures,Michael Chen,All Levels,40,90,15,3,07:30,09:00
+Hot Power Yoga,Intense heated practice,Sarah Johnson,Advanced,38,75,18,3,18:00,19:15
+Gentle Yoga,Slow mindful movement,Lisa Park,Beginner,25,60,25,4,06:00,07:00
+Vinyasa Flow,Flowing movement with breath,Emma Wilson,Intermediate,30,60,20,4,07:30,08:30
+Hot Vinyasa Flow,Powerful flow in heated room,Sarah Johnson,Intermediate,38,60,20,4,18:00,19:00
+Weekend Flow,Perfect Saturday practice,Emma Wilson,All Levels,30,75,25,5,08:00,09:15
+Hot Power Yoga,Intense heated practice,Sarah Johnson,Advanced,38,75,18,5,09:30,10:45
+Restorative Yoga,Gentle healing poses,David Kim,All Levels,25,75,20,6,09:00,10:15

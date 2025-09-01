@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,72 +6,127 @@ import {
   ScrollView,
   TouchableOpacity,
   SafeAreaView,
+  Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { CreditCard, Plus, Clock, Star } from 'lucide-react-native';
-
-// Simple credit system: All passes accumulate into total class credits
-const userCredits = {
-  totalClasses: 8, // Total remaining class credits
-  purchaseHistory: [
-    {
-      id: 1,
-      type: '10 Class Pack',
-      purchasedAt: '2024-01-15',
-      classesAdded: 10,
-      price: 280,
-    },
-    {
-      id: 2,
-      type: '5 Class Pack', 
-      purchasedAt: '2024-01-28',
-      classesAdded: 5,
-      price: 150,
-    },
-  ],
-  classesUsed: 7, // Total classes attended
-};
-
-const availablePasses = [
-  {
-    id: 1,
-    name: 'Single Class',
-    price: 35,
-    classes: 1,
-    validity: '1 day',
-    popular: false,
-    description: 'Perfect for trying us out',
-  },
-  {
-    id: 2,
-    name: '5 Class Pack',
-    price: 150,
-    classes: 5,
-    validity: '2 months',
-    popular: false,
-    description: 'Great for regular practice',
-  },
-  {
-    id: 3,
-    name: '10 Class Pack',
-    price: 280,
-    classes: 10,
-    validity: '3 months',
-    popular: true,
-    description: 'Most popular choice',
-  },
-  {
-    id: 4,
-    name: 'Unlimited Monthly',
-    price: 180,
-    classes: 'Unlimited',
-    validity: '1 month',
-    popular: false,
-    description: 'For dedicated practitioners',
-  },
-];
+import { CreditCard, Plus, Clock, Star, Infinity, Flame } from 'lucide-react-native';
+import { supabase } from '@/src/lib/supabase';
+import { createCheckout } from '@/src/lib/api';
+import * as WebBrowser from 'expo-web-browser';
+import { useFocusEffect } from 'expo-router';
+import { Pass, Purchase, CreditLedgerEntry } from '@/src/types/database';
 
 export default function PassesScreen() {
+  const [passes, setPasses] = useState<Pass[]>([]);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [ledger, setLedger] = useState<CreditLedgerEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [purchasing, setPurchasing] = useState<number | null>(null);
+
+
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      
+             // Fetch active passes
+       const { data: passesData, error: passesError } = await supabase
+         .from('passes')
+         .select('*')
+         .eq('is_active', true);
+
+      console.log('Passes fetch result:', { data: passesData, error: passesError });
+      console.log('Passes count:', passesData?.length || 0);
+      if (passesData && passesData.length > 0) {
+        console.log('First pass:', passesData[0]);
+      }
+
+      // Fetch user's purchases
+      const { data: purchasesData, error: purchasesError } = await supabase
+        .from('purchases')
+        .select('*')
+        .order('purchased_at', { ascending: false });
+
+      console.log('Purchases fetch result:', { data: purchasesData, error: purchasesError });
+
+      // Fetch credit ledger
+      const { data: ledgerData, error: ledgerError } = await supabase
+        .from('credit_ledger')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      console.log('Ledger fetch result:', { data: ledgerData, error: ledgerError });
+
+             // Custom ordering for passes
+       const customOrder = [
+         'Single Class Pass',
+         '5 Class Pass', 
+         '10 Class Pass',
+         '25 Class Pass',
+         'Weekly Unlimited',
+         'Monthly Unlimited',
+         'VIP Monthly',
+         'VIP Yearly'
+       ];
+       
+       const sortedPasses = (passesData || []).sort((a, b) => {
+         const aIndex = customOrder.indexOf(a.name);
+         const bIndex = customOrder.indexOf(b.name);
+         return aIndex - bIndex;
+       });
+
+       setPasses(sortedPasses);
+       setPurchases(purchasesData || []);
+       setLedger(ledgerData || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      Alert.alert('Error', 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchData();
+    setRefreshing(false);
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchData();
+    }, [])
+  );
+
+  const handlePurchase = async (pass: Pass) => {
+    try {
+      setPurchasing(pass.id);
+      
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert('Error', 'Please sign in to purchase passes');
+        return;
+      }
+      
+      const { url } = await createCheckout(pass.id, user.id);
+      
+      // Open browser and wait for result
+      const result = await WebBrowser.openBrowserAsync(url);
+      
+      // Refresh data after browser closes
+      await fetchData();
+    } catch (error) {
+      console.error('Purchase error:', error);
+      Alert.alert('Error', 'Failed to start checkout');
+    } finally {
+      setPurchasing(null);
+    }
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -81,6 +136,42 @@ export default function PassesScreen() {
     });
   };
 
+  const formatPrice = (priceCents?: number, currency?: string) => {
+    if (!priceCents) return 'Price not available';
+    const price = (priceCents / 100).toFixed(2);
+    return `$${price}`;
+  };
+  
+  // Calculate balance from ledger
+  const balance = ledger.reduce((sum, entry) => sum + entry.delta, 0);
+  
+  // Check if user has unlimited pass
+  const hasUnlimitedPass = ledger.some(entry => 
+    entry.reason === 'unlimited_pass_purchase' && 
+    new Date(entry.created_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // Within 30 days
+  );
+  
+  // Calculate total classes used (negative entries)
+  const classesUsed = Math.abs(ledger
+    .filter(entry => entry.delta < 0)
+    .reduce((sum, entry) => sum + entry.delta, 0));
+
+  // Calculate total classes purchased (positive entries from purchases)
+  const totalPurchased = ledger
+    .filter(entry => entry.reason === 'pass_purchase')
+    .reduce((sum, entry) => sum + entry.delta, 0);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#FF6B35" />
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -88,7 +179,13 @@ export default function PassesScreen() {
         <Text style={styles.subtitle}>Manage your credits</Text>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Your Class Credits</Text>
           <LinearGradient
@@ -96,21 +193,31 @@ export default function PassesScreen() {
             style={styles.creditsCard}
           >
             <View style={styles.creditsHeader}>
-              <CreditCard size={28} color="white" />
+              {hasUnlimitedPass ? (
+                <Infinity size={28} color="white" />
+              ) : (
+                <CreditCard size={28} color="white" />
+              )}
               <View style={styles.creditsInfo}>
-                <Text style={styles.creditsTitle}>Available Classes</Text>
-                <Text style={styles.creditsCount}>{userCredits.totalClasses}</Text>
+                <Text style={styles.creditsTitle}>
+                  {hasUnlimitedPass ? 'Unlimited Access' : 'Available Classes'}
+                </Text>
+                <Text style={styles.creditsCount}>
+                  {hasUnlimitedPass ? '∞' : balance}
+                </Text>
               </View>
             </View>
             <View style={styles.creditsStats}>
               <View style={styles.creditsStat}>
                 <Text style={styles.creditsStatLabel}>Classes Used</Text>
-                <Text style={styles.creditsStatValue}>{userCredits.classesUsed}</Text>
+                <Text style={styles.creditsStatValue}>{classesUsed}</Text>
               </View>
               <View style={styles.creditsStat}>
-                <Text style={styles.creditsStatLabel}>Total Purchased</Text>
+                <Text style={styles.creditsStatLabel}>
+                  {hasUnlimitedPass ? 'Unlimited Pass' : 'Total Purchased'}
+                </Text>
                 <Text style={styles.creditsStatValue}>
-                  {userCredits.purchaseHistory.reduce((sum, purchase) => sum + purchase.classesAdded, 0)}
+                  {hasUnlimitedPass ? 'Active' : totalPurchased}
                 </Text>
               </View>
             </View>
@@ -118,58 +225,109 @@ export default function PassesScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Purchase History</Text>
-          {userCredits.purchaseHistory.map((purchase) => (
-            <View key={purchase.id} style={styles.historyCard}>
-              <View style={styles.historyHeader}>
-                <Text style={styles.historyType}>{purchase.type}</Text>
-                <Text style={styles.historyPrice}>${purchase.price}</Text>
-              </View>
-              <View style={styles.historyDetails}>
-                <Text style={styles.historyClasses}>+{purchase.classesAdded} classes</Text>
-                <Text style={styles.historyDate}>
-                  {formatDate(purchase.purchasedAt)}
-                </Text>
-              </View>
+          <Text style={styles.sectionTitle}>Buy New Passes</Text>
+          {passes.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>No passes available</Text>
             </View>
-          ))}
+          ) : (
+            passes.map((pass) => (
+              <View key={pass.id} style={styles.purchaseCard}>
+                {pass.name.includes('10 Class') && (
+                  <View style={styles.popularBadge}>
+                    <Star size={12} color="white" />
+                    <Text style={styles.popularText}>Most Popular</Text>
+                  </View>
+                )}
+                {pass.name.includes('VIP') && (
+                  <View style={styles.vipBadge}>
+                    <Flame size={12} color="white" />
+                    <Text style={styles.vipText}>VIP</Text>
+                  </View>
+                )}
+                                 <View style={styles.purchaseHeader}>
+                   <View style={styles.purchaseInfo}>
+                     <Text style={styles.purchaseName}>{pass.name}</Text>
+                     <Text style={styles.purchaseDescription}>
+                       {pass.description}
+                     </Text>
+                   </View>
+                   <Text style={styles.purchasePrice}>
+                     {formatPrice(pass.price_cents, pass.currency)}
+                   </Text>
+                 </View>
+                <View style={styles.purchaseDetails}>
+                  <View style={styles.purchaseDetail}>
+                    <Text style={styles.purchaseDetailLabel}>Classes:</Text>
+                    <Text style={styles.purchaseDetailValue}>
+                      {pass.unlimited ? (
+                        <View style={styles.unlimitedContainer}>
+                          <Infinity size={16} color="#FF6B35" />
+                          <Text style={styles.unlimitedText}>Unlimited</Text>
+                        </View>
+                      ) : (
+                        pass.credits
+                      )}
+                    </Text>
+                  </View>
+                  <View style={styles.purchaseDetail}>
+                    <Text style={styles.purchaseDetailLabel}>Valid for:</Text>
+                    <Text style={styles.purchaseDetailValue}>
+                      {pass.validity_days ? `${pass.validity_days} days` : 'No expiry'}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity 
+                  style={[
+                    styles.purchaseButton,
+                    purchasing === pass.id && styles.purchaseButtonDisabled
+                  ]}
+                  onPress={() => handlePurchase(pass)}
+                  disabled={purchasing === pass.id}
+                >
+                  {purchasing === pass.id ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <Plus size={16} color="white" />
+                  )}
+                  <Text style={styles.purchaseButtonText}>
+                    {purchasing === pass.id ? 'Processing...' : 'Purchase'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Buy New Passes</Text>
-          {availablePasses.map((pass) => (
-            <View key={pass.id} style={styles.purchaseCard}>
-              {pass.popular && (
-                <View style={styles.popularBadge}>
-                  <Star size={12} color="white" />
-                  <Text style={styles.popularText}>Most Popular</Text>
-                </View>
-              )}
-              <View style={styles.purchaseHeader}>
-                <View style={styles.purchaseInfo}>
-                  <Text style={styles.purchaseName}>{pass.name}</Text>
-                  <Text style={styles.purchaseDescription}>
-                    {pass.description}
-                  </Text>
-                </View>
-                <Text style={styles.purchasePrice}>${pass.price}</Text>
-              </View>
-              <View style={styles.purchaseDetails}>
-                <View style={styles.purchaseDetail}>
-                  <Text style={styles.purchaseDetailLabel}>Classes:</Text>
-                  <Text style={styles.purchaseDetailValue}>{pass.classes}</Text>
-                </View>
-                <View style={styles.purchaseDetail}>
-                  <Text style={styles.purchaseDetailLabel}>Valid for:</Text>
-                  <Text style={styles.purchaseDetailValue}>{pass.validity}</Text>
-                </View>
-              </View>
-              <TouchableOpacity style={styles.purchaseButton}>
-                <Plus size={16} color="white" />
-                <Text style={styles.purchaseButtonText}>Purchase</Text>
-              </TouchableOpacity>
+          <Text style={styles.sectionTitle}>Purchase History</Text>
+          {purchases.length === 0 ? (
+            <View style={styles.emptyState}>
+              <CreditCard size={48} color="#ccc" />
+              <Text style={styles.emptyStateText}>No purchases yet</Text>
+              <Text style={styles.emptyStateSubtext}>Buy your first pass to get started</Text>
             </View>
-          ))}
+          ) : (
+            purchases.map((purchase) => {
+              const pass = passes.find(p => p.id === purchase.pass_id);
+              return (
+                <View key={purchase.id} style={styles.historyCard}>
+                  <View style={styles.historyHeader}>
+                    <Text style={styles.historyType}>{pass?.name || 'Unknown Pass'}</Text>
+                    <Text style={styles.historyPrice}>Purchased</Text>
+                  </View>
+                  <View style={styles.historyDetails}>
+                    <Text style={styles.historyClasses}>
+                      {pass?.unlimited ? 'Unlimited access' : `+${pass?.credits || 0} classes`}
+                    </Text>
+                    <Text style={styles.historyDate}>
+                      {formatDate(purchase.purchased_at)}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -180,6 +338,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
   },
   header: {
     paddingHorizontal: 20,
@@ -210,10 +378,34 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 16,
   },
+  emptyState: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 32,
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 12,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 4,
+  },
   creditsCard: {
     borderRadius: 16,
     padding: 24,
     marginBottom: 12,
+    shadowColor: '#FF6B35',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   creditsHeader: {
     flexDirection: 'row',
@@ -324,6 +516,23 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
+  vipBadge: {
+    position: 'absolute',
+    top: -6,
+    left: 16,
+    backgroundColor: '#FFD700',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  vipText: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: 'white',
+  },
   purchaseHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -344,7 +553,7 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   purchasePrice: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#FF6B35',
   },
@@ -366,24 +575,31 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
+  unlimitedContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  unlimitedText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FF6B35',
+  },
   purchaseButton: {
     backgroundColor: '#FF6B35',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: 8,
+  },
+  purchaseButtonDisabled: {
+    backgroundColor: '#ccc',
   },
   purchaseButtonText: {
     color: 'white',
     fontSize: 14,
     fontWeight: 'bold',
-  },
-  sectionSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
-    marginTop: -8,
   },
 });

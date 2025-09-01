@@ -1,38 +1,36 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { AuthProvider } from "@/providers/auth-provider";
-
-SplashScreen.preventAutoHideAsync();
-
-const queryClient = new QueryClient();
+import { Stack } from 'expo-router';
+import { AuthProvider, useAuth } from '@/providers/auth-provider';
+import { useEffect } from 'react';
+import { router } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 
 function RootLayoutNav() {
+  const { user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!loading) {
+      if (user) {
+        // User is signed in, redirect to main app
+        router.replace('/(tabs)');
+      } else {
+        // User is not signed in, redirect to onboarding
+        router.replace('/onboarding');
+      }
+    }
+  }, [user, loading]);
+
   return (
-    <Stack screenOptions={{ headerBackTitle: "Back" }}>
-      <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-      <Stack.Screen name="class-details" options={{ presentation: "modal" }} />
-      <Stack.Screen name="booking-confirmation" options={{ presentation: "modal" }} />
-    </Stack>
+    <>
+      <StatusBar style="light" hidden />
+      <Stack screenOptions={{ headerShown: false }} />
+    </>
   );
 }
 
 export default function RootLayout() {
-  useEffect(() => {
-    SplashScreen.hideAsync();
-  }, []);
-
   return (
-    <QueryClientProvider client={queryClient}>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <AuthProvider>
-          <RootLayoutNav />
-        </AuthProvider>
-      </GestureHandlerRootView>
-    </QueryClientProvider>
+    <AuthProvider>
+      <RootLayoutNav />
+    </AuthProvider>
   );
 }

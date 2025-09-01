@@ -1,19 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
-import { createClient, Session, User } from '@supabase/supabase-js';
+import { Session, User } from '@supabase/supabase-js';
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const supabaseUrl = 'https://xptvswvchqiaujygmxgq.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwdHZzd3ZjaHFpYXVqeWdteGdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2MTQ1NDYsImV4cCI6MjA3MjE5MDU0Nn0.GlF_VWpgMdkAbCiUHY_Wyv_4YLg5tc2gKYUmKjaOxrg';
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    storage: AsyncStorage,
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-});
+import { supabase } from '@/src/lib/supabase';
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<User | null>(null);
@@ -37,7 +25,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string, firstName: string, lastName: string) => {
+  const signUp = useCallback(async (email: string, password: string, firstName: string, lastName: string, phoneNumber: string, waiverAccepted: boolean) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -45,11 +33,34 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         data: {
           first_name: firstName,
           last_name: lastName,
+          phone_number: phoneNumber,
+          waiver_accepted: waiverAccepted,
+          waiver_accepted_at: new Date().toISOString(),
         },
       },
     });
 
     if (error) throw error;
+
+    // If email confirmation is disabled, create profile immediately
+    if (data.user && !data.session) {
+      // Email confirmation is required
+      return data;
+    }
+
+    // Email confirmation is disabled, create profile and return session
+    if (data.user && data.session) {
+      await supabase.from('profiles').upsert({ 
+        id: data.user.id, 
+        email: data.user.email,
+        first_name: firstName,
+        last_name: lastName,
+        phone_number: phoneNumber,
+        waiver_accepted: waiverAccepted,
+        waiver_accepted_at: new Date().toISOString(),
+      });
+    }
+
     return data;
   }, []);
 
@@ -60,6 +71,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     });
 
     if (error) throw error;
+
+    // Create profile on first login if it doesn't exist
+    if (data.user) {
+      await supabase.from('profiles').upsert({ 
+        id: data.user.id, 
+        email: data.user.email 
+      });
+    }
+
     return data;
   }, []);
 
